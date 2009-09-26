@@ -104,9 +104,9 @@ parse_link(Binary, Context) ->
 		_ ->
 		    {syntax_error, reference_to_undeclared_link_definition}
 	    end;
-	<<":",Binary3/binary>> ->	
-		    %{context, Rest2, Context2} ->    
-	    ok;
+	<<":",Binary3/binary>> -> 
+	    {Binary4, Link, Title} =  parse_link_remainder(Binary3, <<")">>),
+	    {context, Binary4, [{Text, {Link, Title}} | Context]};
 	<<_:1/binary,Binary3/binary>> ->
 	    {syntax_error, expected_paren_bracket_or_colon}
     end.
@@ -131,7 +131,6 @@ parse_link_text(<<Char:1/binary, Binary/binary>>, Acc) ->
 %%	    {Binary4, Link, Title} =  parse_link_remainder(Binary3, <<")">>),
 parse_link_remainder(<<Binary/binary>>, <<EndChar:1/binary>>) ->
     parse_link_remainder(Binary, EndChar, [], [], link).
-
 parse_link_remainder(<<EndChar:1/binary>>, EndChar, LinkAcc, TitleAcc, _) ->
     Link = lists:append(lists:map(fun(X) -> binary_to_list(X) end, lists:reverse(LinkAcc))),
     Title = lists:append(lists:map(fun(X) -> binary_to_list(X) end, lists:reverse(TitleAcc))),
@@ -150,9 +149,6 @@ parse_link_remainder(<<"\"", Binary/binary>>, EndChar, LinkAcc, TitleAcc, title)
     parse_link_remainder(Binary, EndChar, LinkAcc, TitleAcc, done);
 parse_link_remainder(<<Char:1/binary, Binary/binary>>, EndChar, LinkAcc, TitleAcc, title) ->
     parse_link_remainder(Binary, EndChar, LinkAcc, [Char | TitleAcc], title).
-
-    
-
 
 %% @doc close a tag if it is in the open tags stack,
 %%      otherwise open it.
