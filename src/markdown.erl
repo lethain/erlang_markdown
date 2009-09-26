@@ -4,73 +4,95 @@
 -author("Will Larson <lethain@gmail.com>").
 -version("0.0.1").
 -export([markdown/1]).
+-export([single_line/5, multi_line/5]).
 -export([toggle_tag/3, exclusive_insert_tag/3]).
 -export([parse_link/2, parse_link_text/2, parse_link_remainder/2]).
 
 markdown(Text) when is_list(Text) ->
     markdown(list_to_binary(Text));
 markdown(Binary) when is_binary(Binary) ->
-    markdown(Binary, [], [], []).
+    multi_line(Binary, [], [], [], []).
 
-markdown(<<"">>, OpenTags, Acc, _Context) ->
+
+%%
+%% Multi-line Entities
+%%
+multi_line(Binary, OpenTags, Acc, LinkContext, MultiContext) ->
+    single_line(Binary, OpenTags, Acc, LinkContext, MultiContext).
+
+
+
+%%
+%% Single Line Entities (headers, em, strong, links, code)
+%%
+
+%% Wrapup function, called at end of document.
+single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
     ClosedTags = lists:foldr(fun(Tag, Acc2) ->
 				     [<<"</",Tag/binary,">">> | Acc2]
-			     end, Acc, OpenTags),
+			     end, Acc, lists:append([OpenTags, MultiContext])),
     % markdown is gathered in reverse order
     Reversed = lists:reverse(ClosedTags),
     list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
 
-markdown(<<"#####", Rest/binary>>, OpenTags, Acc, Context) ->
+%% Pass control to multi-line entity handler when
+%% encountering new-line.
+single_line(<<"\n", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    multi_line(Rest, OpenTags, Acc, LinkContext, MultiContext);
+
+single_line(<<"#####", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = exclusive_insert_tag(<<"h5">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"####", Rest/binary>>, OpenTags, Acc, Context) ->
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"####", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = exclusive_insert_tag(<<"h4">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"###", Rest/binary>>, OpenTags, Acc, Context) ->
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"###", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = exclusive_insert_tag(<<"h3">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"##", Rest/binary>>, OpenTags, Acc, Context) ->
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"##", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = exclusive_insert_tag(<<"h2">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"#", Rest/binary>>, OpenTags, Acc, Context) ->
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"#", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = exclusive_insert_tag(<<"h1">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"**", Rest/binary>>, OpenTags, Acc, Context) ->
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"**", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = toggle_tag(<<"strong">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"*", Rest/binary>>, OpenTags, Acc, Context) ->
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"*", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = toggle_tag(<<"em">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"``", Rest/binary>>, OpenTags, Acc, Context) ->
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"``", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = toggle_tag(<<"code">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"`", Rest/binary>>, OpenTags, Acc, Context) ->
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"`", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = toggle_tag(<<"code">>, OpenTags, Acc),
-    markdown(Rest, OpenTags2, Acc2, Context);
-markdown(<<"![", Rest/binary>>, OpenTags, Acc, Context) ->
-    case parse_link(<<"[", Rest/binary>>, Context) of
+    single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
+single_line(<<"![", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    case parse_link(<<"[", Rest/binary>>, LinkContext) of
 	{link, Rest2, Href, Text, []} ->
 	    Img = <<"<img src=\"", Href/binary, "\" alt=\"", Text/binary, "\">">>,
-	    markdown(Rest2, OpenTags, [Img | Acc], Context);
+	    single_line(Rest2, OpenTags, [Img | Acc], LinkContext, MultiContext);
 	{link, Rest2, Href, Text, Title} ->
 	    Img = <<"<img src=\"", Href/binary, "\" alt=\"", Text/binary, "\" title=\"", Title/binary, "\">">>,
-	    markdown(Rest2, OpenTags, [Img | Acc], Context)
+	    single_line(Rest2, OpenTags, [Img | Acc], LinkContext, MultiContext)
     end;
-
-markdown(<<"[", Rest/binary>>, OpenTags, Acc, Context) ->
-    case parse_link(<<"[" , Rest/binary>>, Context) of
+single_line(<<"[", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    case parse_link(<<"[" , Rest/binary>>, LinkContext) of
 	{link, Rest2, Href, Text, <<"">>} ->
 	    Link = <<"<a href=\"", Href/binary, "\">", Text/binary, "</a>">>,
-	    markdown(Rest2, OpenTags, [Link | Acc], Context);
+	    single_line(Rest2, OpenTags, [Link | Acc], LinkContext, MultiContext);
 	{link, Rest2, Href, Text, Title} ->
 	    Link = <<"<a href=\"", Href/binary, "\" title=\"", Title/binary, "\">", Text/binary, "</a>">>,
-	    markdown(Rest2, OpenTags, [Link | Acc], Context);
-	{context, Rest2, Context2} ->
-	    markdown(Rest2, OpenTags, Acc, Context2)
+	    single_line(Rest2, OpenTags, [Link | Acc], LinkContext, MultiContext);
+	{context, Rest2, LinkContext2} ->
+	    single_line(Rest2, OpenTags, Acc, LinkContext2, MultiContext)
     end;
+single_line(<<B:1/binary, Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    single_line(Rest, OpenTags, [B | Acc], LinkContext, MultiContext).
 
-markdown(<<B:1/binary, Rest/binary>>, OpenTags, Acc, Context) ->
-    markdown(Rest, OpenTags, [B | Acc], Context).
+%%
+%% Utility functions (parsing links, managing tags, etc)
+%%
 
 
 %% @doc sub-parser for handling links.
@@ -89,7 +111,7 @@ markdown(<<B:1/binary, Rest/binary>>, OpenTags, Acc, Context) ->
 %%       text = string()
 %%       title = string() | undefined
 %%       proplist = [{binary(), binary()}]
-parse_link(Binary, Context) ->
+parse_link(Binary, LinkContext) ->
     {Binary2, Text} = parse_link_text(Binary,[]),
     case Binary2 of
 	<<"(", Binary3/binary>> ->
@@ -97,7 +119,7 @@ parse_link(Binary, Context) ->
 	    {link, Binary4, Link, Text, Title};
 	<<"[",Binary3/binary>> ->
 	    {Binary4, Reference} = parse_link_text(<<"[",Binary3/binary>>, []),
-	    case proplists:get_value(Reference, Context) of
+	    case proplists:get_value(Reference, LinkContext) of
 		{Link, Title} ->	    
 		    {link, Binary4, Link, Text, Title};
 		_ ->
@@ -105,7 +127,7 @@ parse_link(Binary, Context) ->
 	    end;
 	<<":",Binary3/binary>> -> 
 	    {Binary4, Link, Title} =  parse_link_remainder(Binary3, <<"\n">>),
-	    {context, Binary4, [{Text, {Link, Title}} | Context]};
+	    {context, Binary4, [{Text, {Link, Title}} | LinkContext]};
 	<<_:1/binary, _Binary3/binary>> ->
 	    {syntax_error, expected_paren_bracket_or_colon}
     end.
