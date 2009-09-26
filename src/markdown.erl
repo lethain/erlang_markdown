@@ -15,7 +15,7 @@ markdown(Binary) when is_binary(Binary) ->
 markdown(<<"">>, OpenTags, Acc, _Context) ->
     ClosedTags = lists:foldr(fun(Tag, Acc2) ->
 				     [<<"</",Tag/binary,">">> | Acc2]
-			     end, Acc, lists:reverse(OpenTags)),
+			     end, Acc, OpenTags),
     % markdown is gathered in reverse order
     Reversed = lists:reverse(ClosedTags),
     list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
@@ -69,7 +69,6 @@ markdown(<<"[", Rest/binary>>, OpenTags, Acc, Context) ->
 	    markdown(Rest2, OpenTags, Acc, Context2)
     end;
 
-    
 markdown(<<B:1/binary, Rest/binary>>, OpenTags, Acc, Context) ->
     markdown(Rest, OpenTags, [B | Acc], Context).
 
