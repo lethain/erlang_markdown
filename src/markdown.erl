@@ -39,13 +39,13 @@ markdown(<<"**", Rest/binary>>, OpenTags, Acc, Context) ->
     {OpenTags2, Acc2} = toggle_tag(<<"strong">>, OpenTags, Acc),
     markdown(Rest, OpenTags2, Acc2, Context);
 markdown(<<"*", Rest/binary>>, OpenTags, Acc, Context) ->
-    {OpenTags2, Acc2} = exclusive_insert_tag(<<"em">>, OpenTags, Acc),
+    {OpenTags2, Acc2} = toggle_tag(<<"em">>, OpenTags, Acc),
     markdown(Rest, OpenTags2, Acc2, Context);
 markdown(<<"``", Rest/binary>>, OpenTags, Acc, Context) ->
-    {OpenTags2, Acc2} = exclusive_insert_tag(<<"code">>, OpenTags, Acc),
+    {OpenTags2, Acc2} = toggle_tag(<<"code">>, OpenTags, Acc),
     markdown(Rest, OpenTags2, Acc2, Context);
 markdown(<<"`", Rest/binary>>, OpenTags, Acc, Context) ->
-    {OpenTags2, Acc2} = exclusive_insert_tag(<<"code">>, OpenTags, Acc),
+    {OpenTags2, Acc2} = toggle_tag(<<"code">>, OpenTags, Acc),
     markdown(Rest, OpenTags2, Acc2, Context);
 markdown(<<"![", Rest/binary>>, OpenTags, Acc, Context) ->
     case parse_link(<<"[", Rest/binary>>, Context) of
