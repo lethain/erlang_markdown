@@ -11,7 +11,7 @@
 -export([trim_whitespace/2, preserve_line/5, start_of_next_line/1, starts_with_number/1]).
 -export([toggle_tag/3, exclusive_insert_tag/3]).
 -export([parse_link/2, parse_link_text/2, parse_link_remainder/2]).
--export([test/0]).
+-export([test/0, test_performance/1]).
 
 -define(DEBUG_LOGGER, fun(_X,_Y) -> ok end).
 %-define(DEBUG_LOGGER, fun(X,Y) -> io:format(X,Y) end).			      
@@ -51,16 +51,28 @@ testcases() ->
      {"test\nthis\n\n>> out", <<"<p>test this</p><blockquote>out</blockquote>">>},
      {"test\nthis\n\n>> out\n>> again\n", <<"<p>test this</p><blockquote>out again</blockquote>">>},
      {"test this\n**out**\n\n>> and this\n>> as well\n\n    woo\n    hoo\n", <<"<p>test this <strong>out</strong></p><blockquote>and this as well</blockquote><pre>woo\nhoo</pre>">>},
-     {"this is really just a test\nis that okay?\n\nand what about\nthis\n", <<"<p>this is really just a test is that okay?</p><p>and what about this</p>">>},
      {"    this is a test\n    of pre\n\n* test this\n* out\n\n woohoo", <<"<pre>this is a test\nof pre</pre><ul><li>test this</li><li>out</li></ul><p>woohoo</p>">>},
      {" *test this ``out``*", <<"<p> <em>test this <code>out</code></em></p>">>},
      {" *test this **out***", <<"<p> <em>test this <strong>out</strong></em></p>">>},
      {"* this is a test\n* so is this\n* and this\n", <<"<ul><li>this is a test</li><li>so is this</li><li>and this</li></ul>">>},
-     {"* *test this **out***", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
      {"* *test this **out***\n", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
-     {"1. test\n2. test", <<"<ol><li>test</li><li>test</ol></li>">>}
+     {"1. test\n2. test", <<"<ol><li>test</li><li>test</ol></li>">>},
+     {"1. this is a test\n2. so is this\n\n* and so on\n* and further\n\na paragraph\n", <<"<ol><li>this is a test</li><li>so is this</li></ol><ul><li>and so on</li><li>and further</li></ul><p>a paragraph</p>">>},
 
+     % failing tests
+     {"* *test this **out***", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
+     {"this is really just a test\nis that okay?\n\nand what about\nthis\n", <<"<p>this is really just a test is that okay?</p><p>and what about this</p>">>}
     ].
+
+test_performance(N) ->
+    Str1 = "* **this is a test** *and so is this*\n* another line\n\n1. a line\n2. a line2\n3. another line\n\n",
+    Str2 = ">> blockquote\n>> blockquote2\n\n    pre block1\n    same pre block\n\n",
+    Str3 = "[test](http://test.com \"this\")\ this out\n ``code block``\n\n",
+    Str = lists:append([Str1, Str2, Str3]),
+    LongStr = lists:append(lists:map(fun(_n) -> Str end, lists:seq(0,N))),
+    {Time, _} = timer:tc(markdown, markdown, [LongStr]),
+    Seconds = Time / 1000000.0,
+    io:format("~p chars took ~p seconds~n", [length(LongStr), Seconds]).
 
 test() ->
     io:format("Running tests: ~n"),
@@ -245,7 +257,8 @@ single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
 			     end, Acc, lists:append([OpenTags, MultiContext])),
     % markdown is gathered in reverse order
     Reversed = lists:reverse(ClosedTags),
-    list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
+    %list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
+    Reversed;
 
 %% Pass control to multi-line entity handler when
 %% encountering new-line.
