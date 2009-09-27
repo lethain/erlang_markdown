@@ -1,23 +1,68 @@
 %% Copyright (c) 2009 Will Larson <lethain@gmail.com>
 %% <insert MIT License here>
+%% @todo support for horizontal rule
+%% @todo support for breaklines
+%% @todo support for secondary title syntax "Title\n====="
 -module(markdown).
 -author("Will Larson <lethain@gmail.com>").
 -version("0.0.1").
 -export([markdown/1]).
--export([single_line/5, multi_line/5]).
+-export([line_start/5, single_line/5, multi_line/5]).
+-export([trim_whitespace/2, preserve_line/5]).
 -export([toggle_tag/3, exclusive_insert_tag/3]).
 -export([parse_link/2, parse_link_text/2, parse_link_remainder/2]).
 
 markdown(Text) when is_list(Text) ->
     markdown(list_to_binary(Text));
 markdown(Binary) when is_binary(Binary) ->
-    multi_line(Binary, [], [], [], []).
+    line_start(Binary, [], [], [], []).
 
 
 %%
 %% Multi-line Entities
 %%
-multi_line(Binary, OpenTags, Acc, LinkContext, MultiContext) ->
+
+%% Manages closing multi-line entities.
+line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    {Trimmed, Offset} = trim_whitespace(Binary, 4 * length(MultiContext)),
+    IndentLevel = erlang:trunc(Offset / 4),
+    QtyTagsToClose = erlang:min(length(MultiContext) - IndentLevel,0),
+    Acc3 = lists:foldr(fun(Tag, Acc2) ->
+			       [<<"</",Tag/binary,">">> | Acc2]
+		       end, Acc, lists:sublist(MultiContext, QtyTagsToClose)),
+    MultiContext2 = lists:nthtail(QtyTagsToClose, MultiContext),
+    multi_line(Trimmed, OpenTags, Acc3, LinkContext, MultiContext2).
+
+%% Manage pre blocks
+multi_line(<<"    ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    % if 4 extra spaces, and not in pre, start a pre
+    case lists:member(<<"pre">>, MultiContext) of
+	true ->	    
+	    preserve_line(Binary, OpenTags, Acc, LinkContext, MultiContext);
+	false ->
+	    preserve_line(Binary, OpenTags, [<<"<pre>">> | Acc], LinkContext, [<<"pre">> | MultiContext])
+    end;
+
+%% Manage unordered blocks
+multi_line(<<"* ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">>, MultiContext]);
+
+%% Manage unordered blocks
+multi_line(<<"- ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">>, MultiContext]);
+
+%% Manage quote blocks
+multi_line(<<">> ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    single_line(Binary, OpenTags, [<<"<blockquote>">> | Acc], LinkContext, [<<"blockquote">>, MultiContext]);
+
+%% Manage quote blocks
+multi_line(<<"> ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    single_line(Binary, OpenTags, [<<"<blockquote>">> | Acc], LinkContext, [<<"blockquote">>, MultiContext]);
+
+%% Manage ordered lists and paragraphs
+multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    %single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">>, MultiContext]);
+    % ordered lists, pre, paragraphs..
     single_line(Binary, OpenTags, Acc, LinkContext, MultiContext).
 
 
@@ -38,7 +83,7 @@ single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
 %% Pass control to multi-line entity handler when
 %% encountering new-line.
 single_line(<<"\n", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    multi_line(Rest, OpenTags, Acc, LinkContext, MultiContext);
+    line_start(Rest, OpenTags, Acc, LinkContext, MultiContext);
 
 single_line(<<"#####", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = exclusive_insert_tag(<<"h5">>, OpenTags, Acc),
@@ -173,6 +218,17 @@ parse_link_remainder(<<"\"", Binary/binary>>, EndChar, LinkAcc, TitleAcc, title)
 parse_link_remainder(<<Char:1/binary, Binary/binary>>, EndChar, LinkAcc, TitleAcc, title) ->
     parse_link_remainder(Binary, EndChar, LinkAcc, [Char | TitleAcc], title).
 
+%% @doc remove all whitespace from a newline, returns count
+%%      of whitespace and trimmed binary.
+trim_whitespace(<<Binary/binary>>, Max) ->
+    trim_whitespace(Binary, 0, Max).
+trim_whitespace(<<Binary/binary>>, Max, Max) ->
+    {Binary, Max};
+trim_whitespace(<<" ", Binary/binary>>, Offset, Max) ->
+    trim_whitespace(Binary, Offset+1, Max);
+trim_whitespace(<<Binary/binary>>, Offset, _Max) ->
+    {Binary, Offset}.
+
 %% @doc close a tag if it is in the open tags stack,
 %%      otherwise open it.
 %% @spec toggle_tag(tag(), tag_stack(), html()) -> {tag_stack(), html()}
@@ -200,3 +256,11 @@ exclusive_insert_tag(Tag, OpenTags, Acc) ->
 	false ->
 	    {[Tag | OpenTags], [<<"<",Tag/binary,">">> | Acc]}
     end.
+
+%% @doc consume an entire line as is without modification
+preserve_line(<<"">>, OpenTags, Acc, LinkContext, MultiContext) ->
+    line_start(<<"">>, OpenTags, Acc, LinkContext, MultiContext);
+preserve_line(<<"\n",Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    line_start(Binary, OpenTags, [<<"\n">> | Acc], LinkContext, MultiContext);
+preserve_line(<<Char:1/binary,Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    preserve_line(Binary, OpenTags, [Char | Acc], LinkContext, MultiContext).
