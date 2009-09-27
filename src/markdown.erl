@@ -8,7 +8,7 @@
 -version("0.0.1").
 -export([markdown/1]).
 -export([line_start/5, single_line/5, multi_line/5]).
--export([trim_whitespace/2, preserve_line/5, start_of_next_line/1]).
+-export([trim_whitespace/2, preserve_line/5, start_of_next_line/1, starts_with_number/1]).
 -export([toggle_tag/3, exclusive_insert_tag/3]).
 -export([parse_link/2, parse_link_text/2, parse_link_remainder/2]).
 -export([test/0]).
@@ -50,10 +50,17 @@ testcases() ->
      {"this is *a test*\n\n    import test\n    import test2\nstill a **test**\n", <<"<p>this is <em>a test</em></p><pre>import test\nimport test2</pre><p>still a <strong>test</strong></p>">>},
      {"test\nthis\n\n>> out", <<"<p>test this</p><blockquote>out</blockquote>">>},
      {"test\nthis\n\n>> out\n>> again\n", <<"<p>test this</p><blockquote>out again</blockquote>">>},
-     {"test this\n**out**\n\n>> and this\n>> as well\n\n    woo\n    hoo\n", <<"<p>test this <strong>out</strong></p><blockquote>and this as well</blockquote><pre>woo\nhoo</pre>">>}
+     {"test this\n**out**\n\n>> and this\n>> as well\n\n    woo\n    hoo\n", <<"<p>test this <strong>out</strong></p><blockquote>and this as well</blockquote><pre>woo\nhoo</pre>">>},
+     {"this is really just a test\nis that okay?\n\nand what about\nthis\n", <<"<p>this is really just a test is that okay?</p><p>and what about this</p>">>},
+     {"    this is a test\n    of pre\n\n* test this\n* out\n\n woohoo", <<"<pre>this is a test\nof pre</pre><ul><li>test this</li><li>out</li></ul><p>woohoo</p>">>},
+     {" *test this ``out``*", <<"<p> <em>test this <code>out</code></em></p>">>},
+     {" *test this **out***", <<"<p> <em>test this <strong>out</strong></em></p>">>},
+     {"* this is a test\n* so is this\n* and this\n", <<"<ul><li>this is a test</li><li>so is this</li><li>and this</li></ul>">>},
+     {"* *test this **out***", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
+     {"* *test this **out***\n", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
+     {"1. test\n2. test", <<"<ol><li>test</li><li>test</ol></li>">>}
+
     ].
-
-
 
 test() ->
     io:format("Running tests: ~n"),
@@ -119,7 +126,11 @@ tag_modifier(Binary, [Element | _MultiContext]) ->
 	    1;
 	{<<"- ", _/binary>>, <<"p">>} ->
 	    1;
+	{<<"\n\n", _/binary>>, <<"p">>} ->
+	    0;
 	{<<_/binary>>, <<"p">>} ->
+	    -1;
+	{<<_/binary>>, <<"li">>} ->
 	    -1;
 	_ ->
 	    0
@@ -158,7 +169,12 @@ multi_line(<<"    ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) 
 
 %% Manage unordered blocks
 multi_line(<<"* ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">> | MultiContext]);
+    case lists:member(<<"ul">>, MultiContext) of
+	true ->
+	    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">> | MultiContext]);
+	false ->
+	    single_line(Binary, OpenTags, [<<"<li>">>, <<"<ul>">> | Acc], LinkContext, [<<"li">>, <<"ul">> | MultiContext])
+    end;
 
 %% Manage unordered blocks
 multi_line(<<"- ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
@@ -188,26 +204,34 @@ multi_line(<<"">>, OpenTags, Acc, LinkContext, []) ->
 multi_line(<<"\n", Binary/binary>>, OpenTags, Acc, LinkContext, []) ->
     single_line(<<"\n", Binary/binary>>, OpenTags, Acc, LinkContext, []);
 %% Manage paragraphs.
-multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, []) ->
-    single_line(Binary, OpenTags, [<<"<p>">> | Acc], LinkContext, [<<"p">>]);
-
 multi_line(<<"">>, OpenTags, Acc, LinkContext, MultiContext) ->
     single_line(<<"">>, OpenTags, Acc, LinkContext, MultiContext);
 
 %% Manage ordered lists and default..
 multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     % insert space for multi-line paragraphs
-    Acc2 = case lists:member(<<"p">>, MultiContext) of
-	       true ->
-		   [<<" ">> | Acc];
-	       false ->
-		   Acc
-	   end,
-
-    %single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">>, MultiContext]);
-    % ordered lists, paragraphs..
-    single_line(Binary, OpenTags, Acc2, LinkContext, MultiContext).
-
+    case starts_with_number(Binary) of
+	{true, Binary2} ->
+	    case lists:member(<<"ol">>, MultiContext) of
+		true ->
+		    single_line(Binary2, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">> | MultiContext]);
+		false ->
+		    single_line(Binary2, OpenTags, [<<"<li>">>, <<"<ol>">> | Acc], LinkContext, [<<"li">>, <<"ol">> | MultiContext])
+	    end;	
+	false ->	  
+	    case MultiContext of
+		[] ->		    
+		    single_line(Binary, OpenTags, [<<"<p>">> | Acc], LinkContext, [<<"p">>]);
+		_ ->		    
+		    Acc2 = case lists:member(<<"p">>, MultiContext) of
+			       true ->
+				   [<<" ">> | Acc];
+			       false ->
+				   Acc
+			   end,
+		    single_line(Binary, OpenTags, Acc2, LinkContext, MultiContext)
+	    end
+    end.
 
 
 %%
@@ -415,3 +439,19 @@ start_of_next_line(<<"\n", Binary/binary>>) ->
     Binary;
 start_of_next_line(<<_Char:1/binary, Binary/binary>>) ->
     start_of_next_line(Binary).
+
+%% @doc determine if line starts with a number
+starts_with_number(<<Binary/binary>>) ->
+    starts_with_number(Binary, []).
+starts_with_number(<<".", _Binary/binary>>, []) ->
+    false;
+starts_with_number(<<". ", Binary/binary>>, _Acc) ->
+    {true, Binary};
+starts_with_number(<<Char:1/binary, Binary/binary>>, Acc) ->
+    try 
+	_Integer = list_to_integer(binary_to_list(Char)),
+	starts_with_number(Binary, [Char | Acc])
+    catch 
+	_:_ ->
+	    false 
+    end.
