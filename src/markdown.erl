@@ -8,29 +8,91 @@
 -version("0.0.1").
 -export([markdown/1]).
 -export([line_start/5, single_line/5, multi_line/5]).
--export([trim_whitespace/2, preserve_line/5]).
+-export([trim_whitespace/2, preserve_line/5, start_of_next_line/1]).
 -export([toggle_tag/3, exclusive_insert_tag/3]).
 -export([parse_link/2, parse_link_text/2, parse_link_remainder/2]).
+-export([test/0]).
+
+
+%%
+%% Primary Interface
+%%
 
 markdown(Text) when is_list(Text) ->
     markdown(list_to_binary(Text));
 markdown(Binary) when is_binary(Binary) ->
     line_start(Binary, [], [], [], []).
 
+%%
+%% Tests
+%%
+
+test() ->
+    <<"<p><em>test</em></p>">> = markdown:markdown("*test*"),
+    <<"<p><strong>test</strong></p>">> = markdown:markdown("**test**"),
+    <<"<p><code>test</code></p>">> = markdown:markdown("``test``"),
+    <<"<p><code>test</code></p>">> = markdown:markdown("`test`"),
+    <<"<p><a href=\"http://test.com/\">test</a></p>">> = markdown:markdown("[test](http://test.com/)"),
+    <<"<p><a href=\"http://test.com/\" title=\"test2\">test</a></p>">> = markdown:markdown("[test](http://test.com/ \"test2\")"),
+    <<"<p><a href=\"http://test.com/\">test</a></p>">> = markdown:markdown("[test]: http://test.com/\n[test][test]"),
+    <<"<p><a href=\"http://test.com/\" title=\"test2\">test</a></p>">> = markdown:markdown("[test]: http://test.com/ \"test2\"\n[test][test]"),
+    <<"<blockquote>this is a test</blockquote>">> = markdown:markdown(">> this is\n>> a test\n"),
+    <<"<pre>this is\na test</pre>">> = markdown:markdown("    this is\n    a test\n"),
+    <<"<pre>this is a\ntestyep</pre><blockquote>and this is too</blockquote>">> =  markdown:markdown("    this is a\n    test\n    yep\n>> and this\n>> is too"),
+    <<"<p>this is a test and another</p><p>and <em>another</em></p>">> = markdown:markdown("this is a test\nand another\n\nand *another*\n"),
+    <<"<pre>test\nthisout</pre><p> <strong>yep</strong></p>">> = markdown:markdown("    test\n    this\n    out\n\n **yep**"),
+    <<"<p>this is <em>a test</em></p><pre>import test\nimport test2</pre><p>still a <strong>test</strong></p>">> = markdown:markdown("this is *a test*\n\n    import test\n    import test2\nstill a **test**\n"),
+    <<"<p>test this</p><p><strong>out</strong></p><blockquote>and this as well</blockquote><pre>woo\nhoo</pre>">> = markdown:markdown("test this\n**out**\n>> and this\n>> as well\n\n    woo\n    hoo\n"),
+
+    %% unordered lists
+    %% ordered lists
+    ok.
 
 %%
 %% Multi-line Entities
 %%
 
+tag_modifier(_Binary, []) ->
+    0;
+tag_modifier(Binary, [Element | _MultiContext]) ->
+    case {start_of_next_line(Binary), Element} of
+	{<<">> ", _/binary>>, <<"blockquote">>} ->
+	    -1;
+	{<<"> ", _/binary>>, <<"blockquote">>} ->
+	    -1;
+	{<<"\n", _/binary>>, <<"blockquote">>} ->
+	    -1;
+	{<<_Char:1/binary,_/binary>>, <<"blockquote">>} ->
+	    0;
+	{<<"">>, <<"blockquote">>} ->
+	    -1;
+	{<<"\n", _/binary>>, <<"p">>} ->
+	    -1;
+	{<<_/binary>>, <<"p">>} ->
+	    0;
+	_ ->
+	    0
+    end.
+
+
+
+
 %% Manages closing multi-line entities.
 line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {Trimmed, Offset} = trim_whitespace(Binary, 4 * length(MultiContext)),
-    IndentLevel = erlang:trunc(Offset / 4),
-    QtyTagsToClose = erlang:min(length(MultiContext) - IndentLevel,0),
+    IndentLevel = erlang:trunc(Offset / 4),   
+    TagsModifier = tag_modifier(Binary, MultiContext),
+    QtyTagsToClose = erlang:max(length(MultiContext) - IndentLevel + TagsModifier,0),
     Acc3 = lists:foldr(fun(Tag, Acc2) ->
 			       [<<"</",Tag/binary,">">> | Acc2]
 		       end, Acc, lists:sublist(MultiContext, QtyTagsToClose)),
-    MultiContext2 = lists:nthtail(QtyTagsToClose, MultiContext),
+    MultiContext2 = case (QtyTagsToClose > length(MultiContext)) of
+			false ->
+			    lists:nthtail(QtyTagsToClose, MultiContext);
+			true ->
+			    []
+		    end,
+
     multi_line(Trimmed, OpenTags, Acc3, LinkContext, MultiContext2).
 
 %% Manage pre blocks
@@ -45,25 +107,52 @@ multi_line(<<"    ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) 
 
 %% Manage unordered blocks
 multi_line(<<"* ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">>, MultiContext]);
+    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">> | MultiContext]);
 
 %% Manage unordered blocks
 multi_line(<<"- ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">>, MultiContext]);
+    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">> | MultiContext]);
 
 %% Manage quote blocks
 multi_line(<<">> ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    single_line(Binary, OpenTags, [<<"<blockquote>">> | Acc], LinkContext, [<<"blockquote">>, MultiContext]);
+    case lists:member(<<"blockquote">>, MultiContext) of
+	true ->
+	    single_line(Binary, OpenTags, [<<" ">> | Acc], LinkContext, MultiContext);
+	false ->
+	    single_line(Binary, OpenTags, [<<"<blockquote>">> | Acc], LinkContext, [<<"blockquote">> | MultiContext])
+    end;
 
 %% Manage quote blocks
 multi_line(<<"> ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    single_line(Binary, OpenTags, [<<"<blockquote>">> | Acc], LinkContext, [<<"blockquote">>, MultiContext]);
+    case lists:member(<<"blockquote">>, MultiContext) of
+	true ->
+	    single_line(Binary, OpenTags, [<<" ">> | Acc], LinkContext, MultiContext);
+	false ->
+	    single_line(Binary, OpenTags, [<<"<blockquote>">> | Acc], LinkContext, [<<"blockquote">> | MultiContext])
+    end;
 
-%% Manage ordered lists and paragraphs
+%% Manage paragraphs. Special case to avoid empty paragraph on final newline.
+multi_line(<<"">>, OpenTags, Acc, LinkContext, []) ->
+    single_line(<<"">>, OpenTags, Acc, LinkContext, []);
+multi_line(<<"\n", Binary/binary>>, OpenTags, Acc, LinkContext, []) ->
+    single_line(<<"\n", Binary/binary>>, OpenTags, Acc, LinkContext, []);
+%% Manage paragraphs.
+multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, []) ->
+    single_line(Binary, OpenTags, [<<"<p>">> | Acc], LinkContext, [<<"p">>]);
+
+%% Manage ordered lists and default..
 multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    % insert space for multi-line paragraphs
+    Acc2 = case lists:member(<<"p">>, MultiContext) of
+	       true ->
+		   [<<" ">> | Acc];
+	       false ->
+		   Acc
+	   end,
+
     %single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">>, MultiContext]);
-    % ordered lists, pre, paragraphs..
-    single_line(Binary, OpenTags, Acc, LinkContext, MultiContext).
+    % ordered lists, paragraphs..
+    single_line(Binary, OpenTags, Acc2, LinkContext, MultiContext).
 
 
 
@@ -264,3 +353,11 @@ preserve_line(<<"\n",Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) 
     line_start(Binary, OpenTags, [<<"\n">> | Acc], LinkContext, MultiContext);
 preserve_line(<<Char:1/binary,Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     preserve_line(Binary, OpenTags, [Char | Acc], LinkContext, MultiContext).
+
+%% @doc skip remainder of line
+start_of_next_line(<<"">>) ->
+    <<"">>;
+start_of_next_line(<<"\n", Binary/binary>>) ->
+    Binary;
+start_of_next_line(<<_Char:1/binary, Binary/binary>>) ->
+    start_of_next_line(Binary).
