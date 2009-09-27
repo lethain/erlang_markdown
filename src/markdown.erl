@@ -13,6 +13,8 @@
 -export([parse_link/2, parse_link_text/2, parse_link_remainder/2]).
 -export([test/0]).
 
+-define(DEBUG_LOGGER, fun(_X,_Y) -> ok end).
+%-define(DEBUG_LOGGER, fun(X,Y) -> io:format(X,Y) end).			      
 
 %%
 %% Primary Interface
@@ -27,26 +29,60 @@ markdown(Binary) when is_binary(Binary) ->
 %% Tests
 %%
 
-test() ->
-    <<"<p><em>test</em></p>">> = markdown:markdown("*test*"),
-    <<"<p><strong>test</strong></p>">> = markdown:markdown("**test**"),
-    <<"<p><code>test</code></p>">> = markdown:markdown("``test``"),
-    <<"<p><code>test</code></p>">> = markdown:markdown("`test`"),
-    <<"<p><a href=\"http://test.com/\">test</a></p>">> = markdown:markdown("[test](http://test.com/)"),
-    <<"<p><a href=\"http://test.com/\" title=\"test2\">test</a></p>">> = markdown:markdown("[test](http://test.com/ \"test2\")"),
-    <<"<p><a href=\"http://test.com/\">test</a></p>">> = markdown:markdown("[test]: http://test.com/\n[test][test]"),
-    <<"<p><a href=\"http://test.com/\" title=\"test2\">test</a></p>">> = markdown:markdown("[test]: http://test.com/ \"test2\"\n[test][test]"),
-    <<"<blockquote>this is a test</blockquote>">> = markdown:markdown(">> this is\n>> a test\n"),
-    <<"<pre>this is\na test</pre>">> = markdown:markdown("    this is\n    a test\n"),
-    <<"<pre>this is a\ntestyep</pre><blockquote>and this is too</blockquote>">> =  markdown:markdown("    this is a\n    test\n    yep\n>> and this\n>> is too"),
-    <<"<p>this is a test and another</p><p>and <em>another</em></p>">> = markdown:markdown("this is a test\nand another\n\nand *another*\n"),
-    <<"<pre>test\nthisout</pre><p> <strong>yep</strong></p>">> = markdown:markdown("    test\n    this\n    out\n\n **yep**"),
-    <<"<p>this is <em>a test</em></p><pre>import test\nimport test2</pre><p>still a <strong>test</strong></p>">> = markdown:markdown("this is *a test*\n\n    import test\n    import test2\nstill a **test**\n"),
-    <<"<p>test this</p><p><strong>out</strong></p><blockquote>and this as well</blockquote><pre>woo\nhoo</pre>">> = markdown:markdown("test this\n**out**\n>> and this\n>> as well\n\n    woo\n    hoo\n"),
+testcases() ->
+    [{"*test*",  <<"<p><em>test</em></p>">>},
+     {"**test**", <<"<p><strong>test</strong></p>">>},
+     {"``test``", <<"<p><code>test</code></p>">>},
+     {"`test`", <<"<p><code>test</code></p>">>},
+     {"[test](http://test.com/)",  <<"<p><a href=\"http://test.com/\">test</a></p>">>},
+     {"[test](http://test.com/ \"test2\")", <<"<p><a href=\"http://test.com/\" title=\"test2\">test</a></p>">>},
+     {"[test]: http://test.com/\n[test][test]", <<"<p><a href=\"http://test.com/\">test</a></p>">>},
+     {"[test]: http://test.com/ \"test2\"\n[test][test]", <<"<p><a href=\"http://test.com/\" title=\"test2\">test</a></p>">>},
+     {"out", <<"<p>out</p>">>},
+     {"out\n", <<"<p>out</p>">>},
+     {"out\nwoot\n", <<"<p>out woot</p>">>},
+     {"out\nwoot", <<"<p>out woot</p>">>},
+     {">> this is\n>> a test\n", <<"<blockquote>this is a test</blockquote>">>},
+     {"    this is\n    a test\n", <<"<pre>this is\na test</pre>">>},
+     {"    this is a\n    test\n    yep\n>> and this\n>> is too", <<"<pre>this is a\ntestyep</pre><blockquote>and this is too</blockquote>">>},
+     {"this is a test\nand another\nand *another*\n", <<"<p>this is a test and another and <em>another</em></p>">>},
+     {"    test\n    this\n    out\n\n **yep**", <<"<pre>test\nthisout</pre><p> <strong>yep</strong></p>">>},
+     {"this is *a test*\n\n    import test\n    import test2\nstill a **test**\n", <<"<p>this is <em>a test</em></p><pre>import test\nimport test2</pre><p>still a <strong>test</strong></p>">>},
+     {"test\nthis\n\n>> out", <<"<p>test this</p><blockquote>out</blockquote>">>},
+     {"test\nthis\n\n>> out\n>> again\n", <<"<p>test this</p><blockquote>out again</blockquote>">>},
+     {"test this\n**out**\n\n>> and this\n>> as well\n\n    woo\n    hoo\n", <<"<p>test this <strong>out</strong></p><blockquote>and this as well</blockquote><pre>woo\nhoo</pre>">>}
+    ].
 
-    %% unordered lists
-    %% ordered lists
-    ok.
+
+
+test() ->
+    io:format("Running tests: ~n"),
+    Tests = testcases(),
+    FailedTests = lists:foldr(fun({Input, Output}, Failed) ->
+				      case markdown(Input) of
+					  Output ->
+					      io:format("."),
+					      Failed;
+					  Other ->
+					      io:format("E"),
+					      [{Input, Output, Other} | Failed]
+				      end end, [], Tests),
+    io:format("~n"),
+    case length(FailedTests) > 0 of
+	true ->
+	    lists:foreach(fun({In, Expected, Got}) ->
+				  io:format("Failed: ~p != ~p (input: ~p)~n", [Got, Expected, In])
+			  end,FailedTests);
+	false ->
+	    ok
+    end,
+    TestsLen = length(Tests),
+    FailedLen = length(FailedTests),
+    PassedLen = TestsLen - FailedLen,
+    io:format("~p Tests Passed / ~p Tests Failed / ~p Total Tests~n", [PassedLen, FailedLen, TestsLen]).
+
+
+
 
 %%
 %% Multi-line Entities
@@ -55,44 +91,59 @@ test() ->
 tag_modifier(_Binary, []) ->
     0;
 tag_modifier(Binary, [Element | _MultiContext]) ->
+    Start = start_of_next_line(Binary),
+    ?DEBUG_LOGGER("start_of_next_line: ~p~nelement: ~p~n", [Start, Element]),
     case {start_of_next_line(Binary), Element} of
 	{<<">> ", _/binary>>, <<"blockquote">>} ->
+	    ?DEBUG_LOGGER(">> ~n",[]),
 	    -1;
 	{<<"> ", _/binary>>, <<"blockquote">>} ->
+	    ?DEBUG_LOGGER("> ~n",[]),
 	    -1;
+	{<<"    ", _/binary>>, <<"blockquote">>} ->
+	    ?DEBUG_LOGGER("pre ~n",[]),
+	    1;
 	{<<"\n", _/binary>>, <<"blockquote">>} ->
+	    ?DEBUG_LOGGER("newline~n",[]),
 	    -1;
 	{<<_Char:1/binary,_/binary>>, <<"blockquote">>} ->
-	    0;
+	    ?DEBUG_LOGGER("_char~n",[]),
+	    -1;
 	{<<"">>, <<"blockquote">>} ->
 	    -1;
-	{<<"\n", _/binary>>, <<"p">>} ->
-	    -1;
+	{<<">> ", _/binary>>, <<"p">>} ->
+	    1;
+	{<<"    ", _/binary>>, <<"p">>} ->
+	    1;
+	{<<"* ", _/binary>>, <<"p">>} ->
+	    1;
+	{<<"- ", _/binary>>, <<"p">>} ->
+	    1;
 	{<<_/binary>>, <<"p">>} ->
-	    0;
+	    -1;
 	_ ->
 	    0
     end.
 
-
-
-
 %% Manages closing multi-line entities.
 line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    ?DEBUG_LOGGER("line_start: ~p~n",[Binary]),
     {Trimmed, Offset} = trim_whitespace(Binary, 4 * length(MultiContext)),
     IndentLevel = erlang:trunc(Offset / 4),   
     TagsModifier = tag_modifier(Binary, MultiContext),
     QtyTagsToClose = erlang:max(length(MultiContext) - IndentLevel + TagsModifier,0),
+    ?DEBUG_LOGGER("TagsToClose = (multicontext) ~p - (indentlevel) ~p + (tagsmodifier) ~p~n", [length(MultiContext), IndentLevel, TagsModifier]),
     Acc3 = lists:foldr(fun(Tag, Acc2) ->
 			       [<<"</",Tag/binary,">">> | Acc2]
 		       end, Acc, lists:sublist(MultiContext, QtyTagsToClose)),
+    ?DEBUG_LOGGER("multi_context ~p => close ~p~n",[MultiContext, lists:sublist(MultiContext, QtyTagsToClose)]),
     MultiContext2 = case (QtyTagsToClose > length(MultiContext)) of
 			false ->
 			    lists:nthtail(QtyTagsToClose, MultiContext);
 			true ->
 			    []
 		    end,
-
+    ?DEBUG_LOGGER("~n",[]),
     multi_line(Trimmed, OpenTags, Acc3, LinkContext, MultiContext2).
 
 %% Manage pre blocks
@@ -139,6 +190,9 @@ multi_line(<<"\n", Binary/binary>>, OpenTags, Acc, LinkContext, []) ->
 %% Manage paragraphs.
 multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, []) ->
     single_line(Binary, OpenTags, [<<"<p>">> | Acc], LinkContext, [<<"p">>]);
+
+multi_line(<<"">>, OpenTags, Acc, LinkContext, MultiContext) ->
+    single_line(<<"">>, OpenTags, Acc, LinkContext, MultiContext);
 
 %% Manage ordered lists and default..
 multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
