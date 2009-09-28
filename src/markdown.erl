@@ -52,15 +52,13 @@ testcases() ->
      {"test\nthis\n\n>> out", <<"<p>test this</p><blockquote>out</blockquote>">>},
      {"test\nthis\n\n>> out\n>> again\n", <<"<p>test this</p><blockquote>out again</blockquote>">>},
      {"test this\n**out**\n\n>> and this\n>> as well\n\n    woo\n    hoo\n", <<"<p>test this <strong>out</strong></p><blockquote>and this as well</blockquote><pre>woo\nhoo</pre>">>},
-     {"    this is a test\n    of pre\n\n* test this\n* out\n\n woohoo", <<"<pre>this is a test\nof pre</pre><ul><li>test this</li><li>out</li></ul><p>woohoo</p>">>},
+     {"    this is a test\n    of pre\n\n* test this\n* out\n\n woohoo", <<"<pre>this is a test\nof pre</pre><ul><li>test this</li><li>out</li></ul><p> woohoo</p>">>},
      {" *test this ``out``*", <<"<p> <em>test this <code>out</code></em></p>">>},
      {" *test this **out***", <<"<p> <em>test this <strong>out</strong></em></p>">>},
      {"* this is a test\n* so is this\n* and this\n", <<"<ul><li>this is a test</li><li>so is this</li><li>and this</li></ul>">>},
      {"* *test this **out***\n", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
      {"1. test\n2. test", <<"<ol><li>test</li><li>test</li></ol>">>},
      {"1. this is a test\n2. so is this\n\n* and so on\n* and further\n\na paragraph\n", <<"<ol><li>this is a test</li><li>so is this</li></ol><ul><li>and so on</li><li>and further</li></ul><p>a paragraph</p>">>},
-
-     % failing tests
      {"* *test this **out***", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
      {"this is really just a test\nis that okay?\n\nand what about\nthis\n", <<"<p>this is really just a test is that okay?</p><p>and what about this</p>">>}
     ].
@@ -101,9 +99,6 @@ test() ->
     PassedLen = TestsLen - FailedLen,
     io:format("~p Tests Passed / ~p Tests Failed / ~p Total Tests~n", [PassedLen, FailedLen, TestsLen]).
 
-
-
-
 %%
 %% Multi-line Entities
 %%
@@ -134,21 +129,6 @@ identify_line_type(<<Binary/binary>>) ->
 	    end
     end.
 
-
-remove_top_tag(ToRemove, Tags, Html) ->
-    {_, Tags3, Html3} = lists:foldr(fun(X, {Done, Acc, Html2}) ->
-			case {Done, lists:member(X, ToRemove)} of
-			    {true, _} ->
-				{true, [X | Acc], Html2};
-			    {false, true} ->
-				{true, Acc, [<<"</",X/binary,">">> | Html2]};
-			    {false, false} ->
-				{false, [X | Acc], Html2}
-			end
-		end, {false,[],Html}, Tags),
-    {Tags3, Html3}.
-
-
 %% Manages closing multi-line entities.
 line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->   
     ?DEBUG_LOGGER("line_start: ~p~n",[Binary]),
@@ -173,7 +153,7 @@ line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
 						remove_top_tag([<<"li">>], Tags2, Acc2)
 					end, {MultiContext, Acc}, lists:seq(1,CloseDepthBy)),
     {Type, Binary3} = identify_line_type(Binary2),
-    io:format("type (~p) and stack (~p) for ~p~n", [Type, MultiContext2, Binary]),
+    ?DEBUG_LOGGER("type (~p) and stack (~p) for ~p~n", [Type, MultiContext2, Binary]),
     {MultiContext3, Acc4} = case {Type, MultiContext2} of
 				{empty_line, [<<"p">> | RestTags]} ->
 				    {RestTags, [<<"</p>">> | Acc3]};
@@ -194,7 +174,7 @@ line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
 				{p, [Tag | RestTags]} ->
 				    case lists:member(Tag, [<<"pre">>, <<"blockquote">>]) of
 					true ->
-					    {[<<"p">> | RestTags], [<<"<p">>,<<"</",Tag/binary,">">> | Acc3]};
+					    {[<<"p">> | RestTags], [<<"<p>">>,<<"</",Tag/binary,">">> | Acc3]};
 					false ->
 					    {[Tag | RestTags], Acc3}
 				    end;
@@ -247,7 +227,7 @@ line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
 %% Wrapup function, called at end of document.
 single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
     Open = lists:reverse(lists:append([OpenTags, MultiContext])),
-    io:format("remaining_tags: ~p~n", [Open]),
+    ?DEBUG_LOGGER("remaining_tags: ~p~n", [Open]),
 
     ClosedTags = lists:foldr(fun(Tag, Acc2) ->
 				     [<<"</",Tag/binary,">">> | Acc2]
@@ -255,6 +235,7 @@ single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
     % markdown is gathered in reverse order
     Reversed = lists:reverse(ClosedTags),
     list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
+
 
 %% Pass control to multi-line entity handler when
 %% encountering new-line.
@@ -466,3 +447,18 @@ starts_with_number(<<Char:1/binary, Binary/binary>>, Acc) ->
 	_:_ ->
 	    false 
     end.
+
+%% @doc remove the first occurance of any of the tags in ToRemove.
+remove_top_tag(ToRemove, Tags, Html) ->
+    {_, Tags3, Html3} = lists:foldr(fun(X, {Done, Acc, Html2}) ->
+			case {Done, lists:member(X, ToRemove)} of
+			    {true, _} ->
+				{true, [X | Acc], Html2};
+			    {false, true} ->
+				{true, Acc, [<<"</",X/binary,">">> | Html2]};
+			    {false, false} ->
+				{false, [X | Acc], Html2}
+			end
+		end, {false,[],Html}, Tags),
+    {Tags3, Html3}.
+
