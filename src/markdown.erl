@@ -7,8 +7,9 @@
 -author("Will Larson <lethain@gmail.com>").
 -version("0.0.1").
 -export([markdown/1]).
--export([line_start/5, single_line/5, multi_line/5]).
--export([trim_whitespace/2, preserve_line/5, start_of_next_line/1, starts_with_number/1]).
+-export([line_start/5, single_line/5]).
+-export([trim_whitespace/2, preserve_line/5, start_of_next_line/1, starts_with_number/1, remove_top_tag/3]).
+-export([identify_line_type/1]).
 -export([toggle_tag/3, exclusive_insert_tag/3]).
 -export([parse_link/2, parse_link_text/2, parse_link_remainder/2]).
 -export([test/0, test_performance/1]).
@@ -44,9 +45,9 @@ testcases() ->
      {"out\nwoot", <<"<p>out woot</p>">>},
      {">> this is\n>> a test\n", <<"<blockquote>this is a test</blockquote>">>},
      {"    this is\n    a test\n", <<"<pre>this is\na test</pre>">>},
-     {"    this is a\n    test\n    yep\n>> and this\n>> is too", <<"<pre>this is a\ntestyep</pre><blockquote>and this is too</blockquote>">>},
+     {"    this is a\n    test\n    yep\n>> and this\n>> is too", <<"<pre>this is a\ntest\nyep</pre><blockquote>and this is too</blockquote>">>},
      {"this is a test\nand another\nand *another*\n", <<"<p>this is a test and another and <em>another</em></p>">>},
-     {"    test\n    this\n    out\n\n **yep**", <<"<pre>test\nthisout</pre><p> <strong>yep</strong></p>">>},
+     {"    test\n    this\n    out\n\n **yep**", <<"<pre>test\nthis\nout</pre><p> <strong>yep</strong></p>">>},
      {"this is *a test*\n\n    import test\n    import test2\nstill a **test**\n", <<"<p>this is <em>a test</em></p><pre>import test\nimport test2</pre><p>still a <strong>test</strong></p>">>},
      {"test\nthis\n\n>> out", <<"<p>test this</p><blockquote>out</blockquote>">>},
      {"test\nthis\n\n>> out\n>> again\n", <<"<p>test this</p><blockquote>out again</blockquote>">>},
@@ -56,7 +57,7 @@ testcases() ->
      {" *test this **out***", <<"<p> <em>test this <strong>out</strong></em></p>">>},
      {"* this is a test\n* so is this\n* and this\n", <<"<ul><li>this is a test</li><li>so is this</li><li>and this</li></ul>">>},
      {"* *test this **out***\n", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
-     {"1. test\n2. test", <<"<ol><li>test</li><li>test</ol></li>">>},
+     {"1. test\n2. test", <<"<ol><li>test</li><li>test</li></ol>">>},
      {"1. this is a test\n2. so is this\n\n* and so on\n* and further\n\na paragraph\n", <<"<ol><li>this is a test</li><li>so is this</li></ol><ul><li>and so on</li><li>and further</li></ul><p>a paragraph</p>">>},
 
      % failing tests
@@ -107,144 +108,137 @@ test() ->
 %% Multi-line Entities
 %%
 
-tag_modifier(_Binary, []) ->
-    0;
-tag_modifier(Binary, [Element | _MultiContext]) ->
-    Start = start_of_next_line(Binary),
-    ?DEBUG_LOGGER("start_of_next_line: ~p~nelement: ~p~n", [Start, Element]),
-    case {start_of_next_line(Binary), Element} of
-	{<<">> ", _/binary>>, <<"blockquote">>} ->
-	    ?DEBUG_LOGGER(">> ~n",[]),
-	    -1;
-	{<<"> ", _/binary>>, <<"blockquote">>} ->
-	    ?DEBUG_LOGGER("> ~n",[]),
-	    -1;
-	{<<"    ", _/binary>>, <<"blockquote">>} ->
-	    ?DEBUG_LOGGER("pre ~n",[]),
-	    1;
-	{<<"\n", _/binary>>, <<"blockquote">>} ->
-	    ?DEBUG_LOGGER("newline~n",[]),
-	    -1;
-	{<<_Char:1/binary,_/binary>>, <<"blockquote">>} ->
-	    ?DEBUG_LOGGER("_char~n",[]),
-	    -1;
-	{<<"">>, <<"blockquote">>} ->
-	    -1;
-	{<<">> ", _/binary>>, <<"p">>} ->
-	    1;
-	{<<"    ", _/binary>>, <<"p">>} ->
-	    1;
-	{<<"* ", _/binary>>, <<"p">>} ->
-	    1;
-	{<<"- ", _/binary>>, <<"p">>} ->
-	    1;
-	{<<"\n\n", _/binary>>, <<"p">>} ->
-	    0;
-	{<<_/binary>>, <<"p">>} ->
-	    -1;
-	{<<_/binary>>, <<"li">>} ->
-	    -1;
-	_ ->
-	    0
-    end.
-
-%% Manages closing multi-line entities.
-line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    ?DEBUG_LOGGER("line_start: ~p~n",[Binary]),
-    {Trimmed, Offset} = trim_whitespace(Binary, 4 * length(MultiContext)),
-    IndentLevel = erlang:trunc(Offset / 4),   
-    TagsModifier = tag_modifier(Binary, MultiContext),
-    QtyTagsToClose = erlang:max(length(MultiContext) - IndentLevel + TagsModifier,0),
-    ?DEBUG_LOGGER("TagsToClose = (multicontext) ~p - (indentlevel) ~p + (tagsmodifier) ~p~n", [length(MultiContext), IndentLevel, TagsModifier]),
-    Acc3 = lists:foldr(fun(Tag, Acc2) ->
-			       [<<"</",Tag/binary,">">> | Acc2]
-		       end, Acc, lists:sublist(MultiContext, QtyTagsToClose)),
-    ?DEBUG_LOGGER("multi_context ~p => close ~p~n",[MultiContext, lists:sublist(MultiContext, QtyTagsToClose)]),
-    MultiContext2 = case (QtyTagsToClose > length(MultiContext)) of
-			false ->
-			    lists:nthtail(QtyTagsToClose, MultiContext);
-			true ->
-			    []
-		    end,
-    ?DEBUG_LOGGER("~n",[]),
-    multi_line(Trimmed, OpenTags, Acc3, LinkContext, MultiContext2).
-
-%% Manage pre blocks
-multi_line(<<"    ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    % if 4 extra spaces, and not in pre, start a pre
-    case lists:member(<<"pre">>, MultiContext) of
-	true ->	    
-	    preserve_line(Binary, OpenTags, Acc, LinkContext, MultiContext);
-	false ->
-	    preserve_line(Binary, OpenTags, [<<"<pre>">> | Acc], LinkContext, [<<"pre">> | MultiContext])
-    end;
-
-%% Manage unordered blocks
-multi_line(<<"* ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    case lists:member(<<"ul">>, MultiContext) of
-	true ->
-	    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">> | MultiContext]);
-	false ->
-	    single_line(Binary, OpenTags, [<<"<li>">>, <<"<ul>">> | Acc], LinkContext, [<<"li">>, <<"ul">> | MultiContext])
-    end;
-
-%% Manage unordered blocks
-multi_line(<<"- ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    single_line(Binary, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">> | MultiContext]);
-
-%% Manage quote blocks
-multi_line(<<">> ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    case lists:member(<<"blockquote">>, MultiContext) of
-	true ->
-	    single_line(Binary, OpenTags, [<<" ">> | Acc], LinkContext, MultiContext);
-	false ->
-	    single_line(Binary, OpenTags, [<<"<blockquote>">> | Acc], LinkContext, [<<"blockquote">> | MultiContext])
-    end;
-
-%% Manage quote blocks
-multi_line(<<"> ", Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    case lists:member(<<"blockquote">>, MultiContext) of
-	true ->
-	    single_line(Binary, OpenTags, [<<" ">> | Acc], LinkContext, MultiContext);
-	false ->
-	    single_line(Binary, OpenTags, [<<"<blockquote>">> | Acc], LinkContext, [<<"blockquote">> | MultiContext])
-    end;
-
-%% Manage paragraphs. Special case to avoid empty paragraph on final newline.
-multi_line(<<"">>, OpenTags, Acc, LinkContext, []) ->
-    single_line(<<"">>, OpenTags, Acc, LinkContext, []);
-multi_line(<<"\n", Binary/binary>>, OpenTags, Acc, LinkContext, []) ->
-    single_line(<<"\n", Binary/binary>>, OpenTags, Acc, LinkContext, []);
-%% Manage paragraphs.
-multi_line(<<"">>, OpenTags, Acc, LinkContext, MultiContext) ->
-    single_line(<<"">>, OpenTags, Acc, LinkContext, MultiContext);
-
-%% Manage ordered lists and default..
-multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
-    % insert space for multi-line paragraphs
+identify_line_type(<<"">>) -> {empty_line, <<"">>};
+identify_line_type(<<"\n", Binary/binary>>) -> {empty_line, Binary};
+identify_line_type(<<"- ", Binary/binary>>) -> {ul, Binary};
+identify_line_type(<<"    - ", Binary/binary>>) -> {ul, Binary};
+%identify_line_type(<<"    - ", Binary/binary>>) -> {deep_ul, Binary};
+identify_line_type(<<"* ", Binary/binary>>) -> {ul, Binary};
+identify_line_type(<<"    * ", Binary/binary>>) -> {ul, Binary};
+%identify_line_type(<<"    * ", Binary/binary>>) -> {deep_ul, Binary};
+identify_line_type(<<"    ", Binary/binary>>) -> {pre, Binary};
+identify_line_type(<<">> ", Binary/binary>>) -> {blockquote, Binary};
+identify_line_type(<<"> ", Binary/binary>>) -> {blockquote, Binary};
+identify_line_type(<<Binary/binary>>) ->
     case starts_with_number(Binary) of
 	{true, Binary2} ->
-	    case lists:member(<<"ol">>, MultiContext) of
-		true ->
-		    single_line(Binary2, OpenTags, [<<"<li>">> | Acc], LinkContext, [<<"li">> | MultiContext]);
-		false ->
-		    single_line(Binary2, OpenTags, [<<"<li>">>, <<"<ol>">> | Acc], LinkContext, [<<"li">>, <<"ol">> | MultiContext])
-	    end;	
-	false ->	  
-	    case MultiContext of
-		[] ->		    
-		    single_line(Binary, OpenTags, [<<"<p>">> | Acc], LinkContext, [<<"p">>]);
-		_ ->		    
-		    Acc2 = case lists:member(<<"p">>, MultiContext) of
-			       true ->
-				   [<<" ">> | Acc];
-			       false ->
-				   Acc
-			   end,
-		    single_line(Binary, OpenTags, Acc2, LinkContext, MultiContext)
+	    {ol, Binary2};
+	false ->
+	    {Binary3, Offset} = trim_whitespace(Binary, 4),
+	    case {Offset==4, starts_with_number(Binary3)} of
+		{true, {true, Binary4}} ->
+		    %{deep_ol, Binary4};
+		    {deep_ol, Binary4};
+		_ ->
+		    {p, Binary}
 	    end
     end.
 
+
+remove_top_tag(ToRemove, Tags, Html) ->
+    {_, Tags3, Html3} = lists:foldr(fun(X, {Done, Acc, Html2}) ->
+			case {Done, lists:member(X, ToRemove)} of
+			    {true, _} ->
+				{true, [X | Acc], Html2};
+			    {false, true} ->
+				{true, Acc, [<<"</",X/binary,">">> | Html2]};
+			    {false, false} ->
+				{false, [X | Acc], Html2}
+			end
+		end, {false,[],Html}, Tags),
+    {Tags3, Html3}.
+
+
+%% Manages closing multi-line entities.
+line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->   
+    ?DEBUG_LOGGER("line_start: ~p~n",[Binary]),
+    % calculate the expected indentation depth based on current stack
+    IndentDepth0 = lists:foldr(fun(Elem, Depth) ->
+				       case Elem of
+					   <<"ol">> -> Depth + 1;
+					   <<"ul">> -> Depth + 1;
+					   _ -> Depth
+				       end end, 0, MultiContext),
+    IndentDepth = erlang:max(IndentDepth0-1,0),
+    % trim whitespace based on indent depth, 4 spaces per indentation depth
+    % restrict trimming to avoid capturing pre blocks and signifigant whitespace
+    % from within pre blocks
+    {Binary2, Offset} = trim_whitespace(Binary, 4*IndentDepth),
+    % close an appropriate number of ol/ul blocks when
+    % the amount of trimmed whitespace is inadequate for
+    % the current indentation depth
+    CloseDepthBy = IndentDepth - trunc(Offset/4),
+    {MultiContext2, Acc3} = lists:foldr(fun(_, {Tags, Acc0}) ->
+						{Tags2, Acc2} = remove_top_tag([<<"ul">>, <<"ol">>], Tags, Acc0),
+						remove_top_tag([<<"li">>], Tags2, Acc2)
+					end, {MultiContext, Acc}, lists:seq(1,CloseDepthBy)),
+    {Type, Binary3} = identify_line_type(Binary2),
+    io:format("type (~p) and stack (~p) for ~p~n", [Type, MultiContext2, Binary]),
+    {MultiContext3, Acc4} = case {Type, MultiContext2} of
+				{empty_line, [<<"p">> | RestTags]} ->
+				    {RestTags, [<<"</p>">> | Acc3]};
+				{empty_line, [<<"pre">> | RestTags]} ->
+				    {RestTags, [<<"</pre>">> | Acc3]};
+				{empty_line, [<<"blockquote">> | RestTags]} ->
+				    {RestTags, [<<"</blockquote>">> | Acc3]};
+				{empty_line, [<<"li">>, <<"ol">> | RestTags]} ->
+				    {RestTags, [<<"</ol>">>, <<"</li>">> | Acc3]};
+				{empty_line, [<<"li">>, <<"ul">> | RestTags]} ->
+				    {RestTags, [<<"</ul>">>, <<"</li>">> | Acc3]};
+				{p, []} ->
+				    {[<<"p">>], [<<"<p>">> | Acc3]};
+				{p, [<<"p">> | RestTags]} ->
+				    {[<<"p">> | RestTags], [<<" ">> | Acc3]};
+				{p, [<<"li">> | RestTags]} ->
+				    {[<<"li">> | RestTags], [<<" ">> | Acc3]};
+				{p, [Tag | RestTags]} ->
+				    case lists:member(Tag, [<<"pre">>, <<"blockquote">>]) of
+					true ->
+					    {[<<"p">> | RestTags], [<<"<p">>,<<"</",Tag/binary,">">> | Acc3]};
+					false ->
+					    {[Tag | RestTags], Acc3}
+				    end;
+				{pre, []} ->
+				    {[<<"pre">>], [<<"<pre>">> | Acc3]};
+				{pre, [<<"pre">> | RestTags]} ->
+				    {[<<"pre">> | RestTags], [<<"\n">> | Acc3]};
+				{pre, [Tag | RestTags]} ->
+				    case lists:member(Tag, [<<"p">>, <<"blockquote">>]) of
+					true ->
+					    {[<<"pre">> | RestTags], [<<"<pre>">>,<<"</",Tag/binary,">">> | Acc3]};
+					false ->
+					    {[Tag | RestTags], Acc3}
+				    end;
+				{blockquote, []} ->
+				    {[<<"blockquote">>], [<<"<blockquote>">> | Acc3]};
+				{blockquote, [<<"blockquote">> | RestTags]} ->
+				    {[<<"blockquote">> | RestTags], [<<" ">> | Acc3]};
+				{blockquote, [Tag | RestTags]} ->
+				    case lists:member(Tag, [<<"pre">>, <<"p">>]) of
+					true ->
+					    {[<<"blockquote">> | RestTags], [<<"<blockquote>">>,<<"</",Tag/binary,">">> | Acc3]};
+					false ->
+					    {[Tag | RestTags], Acc3}
+				    end;
+				{ol, [<<"li">> | RestTags]} ->
+				    {[<<"li">> | RestTags], [<<"<li>">>, <<"</li>">> | Acc3]};
+				{ol, RestTags} ->
+				    {[<<"li">>, <<"ol">> | RestTags], [<<"<li>">>, <<"<ol>">> | Acc3]};
+				{ul, [<<"li">> | RestTags]} ->
+				    {[<<"li">> | RestTags], [<<"<li>">>, <<"</li>">> | Acc3]};
+				{ul, RestTags} ->
+				    {[<<"li">>, <<"ul">> | RestTags], [<<"<li>">>, <<"<ul>">> | Acc3]};
+				_ ->
+				    {MultiContext2, Acc3}
+			    end,
+    case {Type, Binary3} of
+	{empty_line, <<"">>} ->
+	    single_line(Binary3, OpenTags, Acc4, LinkContext, MultiContext3);
+	{empty_line, _} ->
+	    line_start(Binary3, OpenTags, Acc4, LinkContext, MultiContext3);
+	_ ->
+	    single_line(Binary3, OpenTags, Acc4, LinkContext, MultiContext3)
+    end.
 
 %%
 %% Single Line Entities (headers, em, strong, links, code)
@@ -252,13 +246,15 @@ multi_line(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
 
 %% Wrapup function, called at end of document.
 single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
+    Open = lists:reverse(lists:append([OpenTags, MultiContext])),
+    io:format("remaining_tags: ~p~n", [Open]),
+
     ClosedTags = lists:foldr(fun(Tag, Acc2) ->
 				     [<<"</",Tag/binary,">">> | Acc2]
-			     end, Acc, lists:append([OpenTags, MultiContext])),
+			     end, Acc, Open),
     % markdown is gathered in reverse order
     Reversed = lists:reverse(ClosedTags),
-    %list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
-    Reversed;
+    list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
 
 %% Pass control to multi-line entity handler when
 %% encountering new-line.
@@ -456,6 +452,8 @@ start_of_next_line(<<_Char:1/binary, Binary/binary>>) ->
 %% @doc determine if line starts with a number
 starts_with_number(<<Binary/binary>>) ->
     starts_with_number(Binary, []).
+starts_with_number(<<"">>, []) ->
+    false;
 starts_with_number(<<".", _Binary/binary>>, []) ->
     false;
 starts_with_number(<<". ", Binary/binary>>, _Acc) ->
