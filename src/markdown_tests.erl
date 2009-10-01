@@ -42,6 +42,9 @@ testcases() ->
      {"trying  \nthis  \nout\n", <<"<p>trying<br> this<br> out</p>">>},
      {"* test\n    * this\n", <<"<ul><li>test<ul><li>this</li></ul></li></ul>">>},
      {"* test\n    * *test*\n* hi\n\n what about now?\n", <<"<ul><li>test<ul><li><em>test</em></li></ul></li><li>hi</li></ul><p> what about now?</p>">>},
+     {"* test\n    * test2\n        * test3\n", <<"<ul><li>test<ul><li>test2<ul><li>test3</li></ul></li></ul></li></ul>">>},
+     {"* test\n    * test2\n        * test3\n            * test4\n", <<"<ul><li>test<ul><li>test2<ul><li>test3<ul><li>test4</li></ul></li></ul></li></ul></li></ul>">>},
+
      {"1. test\n    2. this\n", <<"<ol><li>test<ol><li>this</li></ol></li></ol>">>},
      {"1. test\n    2. *test*\n3. hi\n\n what about now?\n", <<"<ol><li>test<ol><li><em>test</em></li></ol></li><li>hi</li></ol><p> what about now?</p>">>},
      {"* a\n    * b\n    * c\n* d\n", <<"<ul><li>a<ul><li>b</li><li>c</li></ul></li><li>d</li></ul>">>}
