@@ -1,8 +1,8 @@
 %% Copyright (c) 2009 Will Larson <lethain@gmail.com>
 %% <insert MIT License here>
 %% @todo support for horizontal rule
-%% @todo support for breaklines
 %% @todo support for secondary title syntax "Title\n====="
+%% @todo support for multi-level indentation
 -module(markdown).
 -author("Will Larson <lethain@gmail.com>").
 -version("0.0.2").
@@ -33,11 +33,11 @@ markdown(Binary) when is_binary(Binary) ->
 identify_line_type(<<"">>) -> {empty_line, <<"">>};
 identify_line_type(<<"\n", Binary/binary>>) -> {empty_line, Binary};
 identify_line_type(<<"- ", Binary/binary>>) -> {ul, Binary};
-identify_line_type(<<"    - ", Binary/binary>>) -> {ul, Binary};
-%identify_line_type(<<"    - ", Binary/binary>>) -> {deep_ul, Binary};
+%identify_line_type(<<"    - ", Binary/binary>>) -> {ul, Binary};
+identify_line_type(<<"    - ", Binary/binary>>) -> {deep_ul, Binary};
 identify_line_type(<<"* ", Binary/binary>>) -> {ul, Binary};
-identify_line_type(<<"    * ", Binary/binary>>) -> {ul, Binary};
-%identify_line_type(<<"    * ", Binary/binary>>) -> {deep_ul, Binary};
+%identify_line_type(<<"    * ", Binary/binary>>) -> {ul, Binary};
+identify_line_type(<<"    * ", Binary/binary>>) -> {deep_ul, Binary};
 identify_line_type(<<"    ", Binary/binary>>) -> {pre, Binary};
 identify_line_type(<<">> ", Binary/binary>>) -> {blockquote, Binary};
 identify_line_type(<<"> ", Binary/binary>>) -> {blockquote, Binary};
@@ -76,8 +76,8 @@ line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     % the current indentation depth
     CloseDepthBy = IndentDepth - trunc(Offset/4),
     {MultiContext2, Acc3} = lists:foldr(fun(_, {Tags, Acc0}) ->
-						{Tags2, Acc2} = remove_top_tag([<<"ul">>, <<"ol">>], Tags, Acc0),
-						remove_top_tag([<<"li">>], Tags2, Acc2)
+						{Tags2, Acc2} = remove_top_tag([<<"li">>], Tags, Acc0),
+						remove_top_tag([<<"ul">>, <<"ol">>], Tags2, Acc2)
 					end, {MultiContext, Acc}, lists:seq(1,CloseDepthBy)),
     {Type, Binary3} = identify_line_type(Binary2),
     ?DEBUG_LOGGER("type (~p) and stack (~p) for ~p~n", [Type, MultiContext2, Binary]),
@@ -127,6 +127,10 @@ line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
 					false ->
 					    {[Tag | RestTags], Acc3}
 				    end;
+				{deep_ul, [<<"li">> | RestTags]} ->
+				    {[ <<"li">>,  <<"ul">>, <<"li">> | RestTags], [<<"<li>">>, <<"<ul>">> | Acc3]};
+				{deep_ol, [<<"li">> | RestTags]} ->
+				    {[ <<"li">>,  <<"ol">>, <<"li">> | RestTags], [<<"<li>">>, <<"<ol>">> | Acc3]};
 				{ol, [<<"li">> | RestTags]} ->
 				    {[<<"li">> | RestTags], [<<"<li>">>, <<"</li>">> | Acc3]};
 				{ol, RestTags} ->
@@ -166,6 +170,8 @@ single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
 
 %% Pass control to multi-line entity handler when
 %% encountering new-line.
+single_line(<<"  \n", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
+    line_start(Rest, OpenTags, [<<"<br>">> | Acc], LinkContext, MultiContext);
 single_line(<<"\n", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     line_start(Rest, OpenTags, Acc, LinkContext, MultiContext);
 

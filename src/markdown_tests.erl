@@ -1,7 +1,7 @@
 -module(markdown_tests).
 -author("Will Larson <lethain@gmail.com>").
 -version("0.0.2").
--export([test/0, test_performance/1]).
+-export([test/0, test_performance/1, test_performance/2]).
 %%
 %% Tests
 %%
@@ -36,18 +36,35 @@ testcases() ->
      {"1. test\n2. test", <<"<ol><li>test</li><li>test</li></ol>">>},
      {"1. this is a test\n2. so is this\n\n* and so on\n* and further\n\na paragraph\n", <<"<ol><li>this is a test</li><li>so is this</li></ol><ul><li>and so on</li><li>and further</li></ul><p>a paragraph</p>">>},
      {"* *test this **out***", <<"<ul><li><em>test this <strong>out</strong></em></li></ul>">>},
-     {"this is really just a test\nis that okay?\n\nand what about\nthis\n", <<"<p>this is really just a test is that okay?</p><p>and what about this</p>">>}
+     {"this is really just a test\nis that okay?\n\nand what about\nthis\n", <<"<p>this is really just a test is that okay?</p><p>and what about this</p>">>},
+     {"------------\n", <<"<hr>">>},
+     {"hello\n------------\ngoodbye\n", <<"<p>hello</p><hr><p>goodbye</p>">>},
+     {"trying  \nthis  \nout\n", <<"<p>trying<br> this<br> out</p>">>},
+     {"* test\n    * this\n", <<"<ul><li>test<ul><li>this</li></ul></li></ul>">>},
+     {"* test\n    * *test*\n* hi\n\n what about now?\n", <<"<ul><li>test<ul><li><em>test</em></li></ul></li><li>hi</li></ul><p> what about now?</p>">>},
+     {"1. test\n    2. this\n", <<"<ol><li>test<ol><li>this</li></ol></li></ol>">>},
+     {"1. test\n    2. *test*\n3. hi\n\n what about now?\n", <<"<ol><li>test<ol><li><em>test</em></li></ol></li><li>hi</li></ol><p> what about now?</p>">>},
+     {"* a\n    * b\n    * c\n* d\n", <<"<ul><li>a<ul><li>b</li><li>c</li></ul></li><li>d</li></ul>">>}
     ].
 
 test_performance(N) ->
+    test_performance(N, 10).
+
+test_performance(N, Runs) ->
     Str1 = "* **this is a test** *and so is this*\n* another line\n\n1. a line\n2. a line2\n3. another line\n\n",
     Str2 = ">> blockquote\n>> blockquote2\n\n    pre block1\n    same pre block\n\n",
     Str3 = "[test](http://test.com \"this\")\ this out\n ``code block``\n\n",
     Str = lists:append([Str1, Str2, Str3]),
     LongStr = lists:append(lists:map(fun(_n) -> Str end, lists:seq(0,N))),
-    {Time, _} = timer:tc(markdown, markdown, [LongStr]),
-    Seconds = Time / 1000000.0,
-    io:format("~p chars took ~p seconds~n", [length(LongStr), Seconds]).
+    Times = lists:map(fun(_X) ->
+			      timer:tc(markdown, markdown, [LongStr])
+		      end, lists:seq(1,Runs)),
+    Time = lists:foldr(fun({Micros, _}, Acc) ->
+			       Micros + Acc
+		       end, 0, Times),
+    Seconds = (Time / N) / 1000000.0,
+    Length = length(LongStr),
+    io:format("~p chars took ~p seconds (microseconds per char: ~p) ~n", [Length, Seconds, (Time/N)/Length]).
 
 test() ->
     io:format("Running tests: ~n"),
