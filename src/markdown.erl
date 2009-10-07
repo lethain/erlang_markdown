@@ -33,27 +33,25 @@ markdown(Binary) when is_binary(Binary) ->
 identify_line_type(<<"">>) -> {empty_line, <<"">>};
 identify_line_type(<<"\n", Binary/binary>>) -> {empty_line, Binary};
 identify_line_type(<<"- ", Binary/binary>>) -> {ul, Binary};
-%identify_line_type(<<"    - ", Binary/binary>>) -> {ul, Binary};
 identify_line_type(<<"    - ", Binary/binary>>) -> {deep_ul, Binary};
 identify_line_type(<<"* ", Binary/binary>>) -> {ul, Binary};
-%identify_line_type(<<"    * ", Binary/binary>>) -> {ul, Binary};
 identify_line_type(<<"    * ", Binary/binary>>) -> {deep_ul, Binary};
-identify_line_type(<<"    ", Binary/binary>>) -> {pre, Binary};
 identify_line_type(<<">> ", Binary/binary>>) -> {blockquote, Binary};
 identify_line_type(<<"> ", Binary/binary>>) -> {blockquote, Binary};
+identify_line_type(<<"    ", Binary/binary>>) ->
+    case starts_with_number(Binary) of    
+	{true, Binary2} ->
+	    {deep_ol, Binary2};
+	false ->
+	    {pre, Binary}
+    end;
+
 identify_line_type(<<Binary/binary>>) ->
-    case starts_with_number(Binary) of
+    case starts_with_number(Binary) of    
 	{true, Binary2} ->
 	    {ol, Binary2};
 	false ->
-	    {Binary3, Offset} = trim_whitespace(Binary, 4),
-	    case {Offset==4, starts_with_number(Binary3)} of
-		{true, {true, Binary4}} ->
-		    %{deep_ol, Binary4};
-		    {deep_ol, Binary4};
-		_ ->
-		    {p, Binary}
-	    end
+	    {p, Binary}
     end.
 
 %% Manages closing multi-line entities.
@@ -71,6 +69,7 @@ line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     % restrict trimming to avoid capturing pre blocks and signifigant whitespace
     % from within pre blocks
     {Binary2, Offset} = trim_whitespace(Binary, 4*IndentDepth),
+    ?DEBUG_LOGGER("~p => ~p, IndentDepth = ~p, offset ~p~n", [Binary, Binary2, IndentDepth, Offset]),
     % close an appropriate number of ol/ul blocks when
     % the amount of trimmed whitespace is inadequate for
     % the current indentation depth
@@ -365,6 +364,7 @@ start_of_next_line(<<_Char:1/binary, Binary/binary>>) ->
 
 %% @doc determine if line starts with a number
 starts_with_number(<<Binary/binary>>) ->
+    ?DEBUG_LOGGER("starts_with_number: ~p~n", [Binary]),
     starts_with_number(Binary, []).
 starts_with_number(<<"">>, []) ->
     false;
