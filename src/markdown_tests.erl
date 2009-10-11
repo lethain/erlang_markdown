@@ -1,7 +1,8 @@
 -module(markdown_tests).
 -author("Will Larson <lethain@gmail.com>").
 -version("0.0.2").
--export([test/0, test_performance/1, test_performance/2]).
+-compile(export_all).
+
 %%
 %% Tests
 %%
@@ -50,24 +51,29 @@ testcases() ->
      {"* a\n    * b\n    * c\n* d\n", <<"<ul><li>a<ul><li>b</li><li>c</li></ul></li><li>d</li></ul>">>}
     ].
 
+gen_string(N) ->
+    Str1 = "* **this is a test** *and so is this*\n* another line\n\n1. a line\n2. a line2\n3. another line\n\n",
+    Str2 = ">> blockquote\n>> blockquote2\n\n    pre block1\n    same pre block\n\n",
+    Str3 = "[test](http://test.com \"this\")\ this out\n ``code block``\n\n",
+    Str4 = "1. This is a test\n    2. so is this\n    3. yep...n4. yep\n\n* hi\n    * there\n    * ayep..\n * the end\n\n",
+    Str = lists:append([Str1, Str2, Str3, Str4]),
+    lists:append(lists:map(fun(_n) -> Str end, lists:seq(0,N))).
+
 test_performance(N) ->
     test_performance(N, 10).
 
 test_performance(N, Runs) ->
-    Str1 = "* **this is a test** *and so is this*\n* another line\n\n1. a line\n2. a line2\n3. another line\n\n",
-    Str2 = ">> blockquote\n>> blockquote2\n\n    pre block1\n    same pre block\n\n",
-    Str3 = "[test](http://test.com \"this\")\ this out\n ``code block``\n\n",
-    Str = lists:append([Str1, Str2, Str3]),
-    LongStr = lists:append(lists:map(fun(_n) -> Str end, lists:seq(0,N))),
+    LongStr = gen_string(N),
+    LongBinary = list_to_binary(LongStr),
     Times = lists:map(fun(_X) ->
-			      timer:tc(markdown, markdown, [LongStr])
+			      timer:tc(markdown, markdown, [LongBinary])
 		      end, lists:seq(1,Runs)),
     Time = lists:foldr(fun({Micros, _}, Acc) ->
 			       Micros + Acc
 		       end, 0, Times),
     Seconds = (Time / N) / 1000000.0,
     Length = length(LongStr),
-    io:format("~p chars took ~p seconds (microseconds per char: ~p) ~n", [Length, Seconds, (Time/N)/Length]).
+    io:format("~p chars, ~p seconds, ~p us/char~n", [Length, Seconds, (Time/N)/Length]).
 
 test() ->
     io:format("Running tests: ~n"),

@@ -32,6 +32,8 @@ markdown(Binary) when is_binary(Binary) ->
 
 identify_line_type(<<"">>) -> {empty_line, <<"">>};
 identify_line_type(<<"\n", Binary/binary>>) -> {empty_line, Binary};
+%identify_line_type(<<"- -", Binary/binary>>) ->  {hr, Binary};
+%identify_line_type(<<"--", Binary/binary>>) ->  {hr, Binary};
 identify_line_type(<<"- ", Binary/binary>>) -> {ul, Binary};
 identify_line_type(<<"    - ", Binary/binary>>) -> {deep_ul, Binary};
 identify_line_type(<<"* ", Binary/binary>>) -> {ul, Binary};
@@ -45,7 +47,6 @@ identify_line_type(<<"    ", Binary/binary>>) ->
 	false ->
 	    {pre, Binary}
     end;
-
 identify_line_type(<<Binary/binary>>) ->
     case starts_with_number(Binary) of    
 	{true, Binary2} ->
@@ -158,13 +159,13 @@ line_start(<<Binary/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
 single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
     Open = lists:reverse(lists:append([OpenTags, MultiContext])),
     ?DEBUG_LOGGER("remaining_tags: ~p~n", [Open]),
-
     ClosedTags = lists:foldr(fun(Tag, Acc2) ->
 				     [<<"</",Tag/binary,">">> | Acc2]
 			     end, Acc, Open),
     % markdown is gathered in reverse order
     Reversed = lists:reverse(ClosedTags),
-    list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
+    %list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
+    lists:foldr(fun(X,Acc2) -> <<Acc2/binary, X/binary>> end, <<"">>, Reversed);
 
 
 %% Pass control to multi-line entity handler when
@@ -173,7 +174,6 @@ single_line(<<"  \n", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) -
     line_start(Rest, OpenTags, [<<"<br>">> | Acc], LinkContext, MultiContext);
 single_line(<<"\n", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     line_start(Rest, OpenTags, Acc, LinkContext, MultiContext);
-
 single_line(<<"#####", Rest/binary>>, OpenTags, Acc, LinkContext, MultiContext) ->
     {OpenTags2, Acc2} = exclusive_insert_tag(<<"h5">>, OpenTags, Acc),
     single_line(Rest, OpenTags2, Acc2, LinkContext, MultiContext);
