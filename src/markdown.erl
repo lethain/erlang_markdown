@@ -165,7 +165,7 @@ single_line(<<"">>, OpenTags, Acc, _LinkContext, MultiContext) ->
     % markdown is gathered in reverse order
     Reversed = lists:reverse(ClosedTags),
     %list_to_binary(lists:append(lists:map(fun(X) -> binary_to_list(X) end, Reversed)));
-    lists:foldr(fun(X,Acc2) -> <<Acc2/binary, X/binary>> end, <<"">>, Reversed);
+    lists:foldl(fun(X,Acc2) -> <<Acc2/binary, X/binary>> end, <<"">>, Reversed);
 
 
 %% Pass control to multi-line entity handler when
@@ -374,8 +374,8 @@ starts_with_number(<<". ", Binary/binary>>, _Acc) ->
     {true, Binary};
 starts_with_number(<<Char:1/binary, Binary/binary>>, Acc) ->
     try 
-	_Integer = list_to_integer(binary_to_list(Char)),
-	starts_with_number(Binary, [Char | Acc])
+        _ = list_to_integer(binary_to_list(Char)),
+        starts_with_number(Binary, [Char | Acc])
     catch 
 	_:_ ->
 	    false 
@@ -385,12 +385,9 @@ starts_with_number(<<Char:1/binary, Binary/binary>>, Acc) ->
 remove_top_tag(ToRemove, Tags, Html) ->
     {_, Tags3, Html3} = lists:foldr(fun(X, {Done, Acc, Html2}) ->
 			case {Done, lists:member(X, ToRemove)} of
-			    {true, _} ->
-				{true, [X | Acc], Html2};
-			    {false, true} ->
-				{true, Acc, [<<"</",X/binary,">">> | Html2]};
-			    {false, false} ->
-				{false, [X | Acc], Html2}
+			    {true, _} -> {true, [X | Acc], Html2};
+			    {false, true} -> {true, Acc, [<<"</",X/binary,">">> | Html2]};
+			    {false, false} -> {false, [X | Acc], Html2}
 			end
 		end, {false,[],Html}, Tags),
     {Tags3, Html3}.
